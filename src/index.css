@@ -707,7 +707,7 @@ section {
   }
 
   /* Limit review text height on mobile to roughly match grid width */
-  .biography {
+  .gr-text {
     max-height: calc(100vw - 40px);
     overflow-y: auto;
   }
