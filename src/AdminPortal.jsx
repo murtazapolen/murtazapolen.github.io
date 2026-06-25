@@ -17,8 +17,8 @@ function AdminPortal() {
   const [draftReview, setDraftReview] = useState(null); // Holds the review currently being edited
 
   // Hardcoded credentials simulating CI/CD environment variables
-  const ADMIN_USER = 'admin';
-  const ADMIN_PASS = 'salt123';
+  const ADMIN_USER = import.meta.env.VITE_ADMIN_USER || 'admin';
+  const ADMIN_PASS = import.meta.env.VITE_ADMIN_PASS || 'salt123';
 
   // Load reviews on mount
   useEffect(() => {
