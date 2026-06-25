@@ -3,12 +3,13 @@ import './AdminPortal.css';
 import PhotoGrid from './components/PhotoGrid';
 
 function AdminPortal() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(sessionStorage.getItem('isLoggedIn') === 'true');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   
   const [reviews, setReviews] = useState([]);
+  const [initialReviews, setInitialReviews] = useState([]); // Track pristine state
   const [isSaving, setIsSaving] = useState(false);
   
   // Master-Detail State
@@ -16,44 +17,166 @@ function AdminPortal() {
   const [editingIndex, setEditingIndex] = useState(null);
   const [draftReview, setDraftReview] = useState(null); // Holds the review currently being edited
 
+  // GitHub API State
+  const [githubToken, setGithubToken] = useState(localStorage.getItem('githubToken') || '');
+  const [rememberMe, setRememberMe] = useState(!!localStorage.getItem('githubToken'));
+  const [fileSha, setFileSha] = useState('');
+  
+  const isDev = import.meta.env.DEV;
+
   // Hardcoded credentials simulating CI/CD environment variables
   const ADMIN_USER = import.meta.env.VITE_ADMIN_USER || 'admin';
   const ADMIN_PASS = import.meta.env.VITE_ADMIN_PASS || 'salt123';
 
-  // Load reviews on mount
+  // We no longer load reviews on mount. We load them after login using the GitHub API.
+  const fetchReviewsFromGitHub = async (token) => {
+    try {
+      const response = await fetch('https://api.github.com/repos/murtazapolen/murtazapolen.github.io/contents/src/data/reviews.json', {
+        headers: {
+          'Authorization': `token ${token}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      });
+      if (!response.ok) throw new Error('Failed to fetch from GitHub API. Check your PAT.');
+      const data = await response.json();
+      setFileSha(data.sha);
+      const decodedContent = decodeURIComponent(escape(atob(data.content)));
+      const parsedReviews = JSON.parse(decodedContent);
+      setReviews(parsedReviews);
+      setInitialReviews(parsedReviews);
+      return true;
+    } catch (err) {
+      console.error(err);
+      setError(err.message);
+      return false;
+    }
+  };
+
+  const loadData = async (token) => {
+    setIsSaving(true);
+    let success = false;
+    
+    if (isDev) {
+      // In local development, just fetch from the local file
+      try {
+        const res = await fetch('/src/data/reviews.json');
+        if (res.ok) {
+          const data = await res.json();
+          setReviews(data);
+          setInitialReviews(data);
+          success = true;
+        } else {
+          setError('Failed to load local reviews.json');
+        }
+      } catch (err) {
+        console.error(err);
+        setError('Error loading local data');
+      }
+    } else {
+      // In production, require PAT and fetch from GitHub API
+      if (!token) {
+        setError('Salt is required in production.');
+        setIsSaving(false);
+        return false;
+      }
+      success = await fetchReviewsFromGitHub(token);
+    }
+    
+    setIsSaving(false);
+    return success;
+  };
+
   useEffect(() => {
-    fetch('/src/data/reviews.json')
-      .then(res => res.json())
-      .then(data => setReviews(data))
-      .catch(err => console.error("Error loading reviews:", err));
+    if (isLoggedIn) {
+      loadData(githubToken).then(success => {
+        if (!success) {
+          setIsLoggedIn(false);
+          sessionStorage.removeItem('isLoggedIn');
+        }
+      });
+    }
   }, []);
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     if (username === ADMIN_USER && password === ADMIN_PASS) {
-      setIsLoggedIn(true);
-      setError('');
+      const success = await loadData(githubToken);
+      
+      if (success) {
+        if (!isDev) {
+          if (rememberMe) {
+            localStorage.setItem('githubToken', githubToken);
+          } else {
+            localStorage.removeItem('githubToken');
+          }
+        }
+        setIsLoggedIn(true);
+        sessionStorage.setItem('isLoggedIn', 'true');
+        setError('');
+      }
     } else {
       setError('Invalid credentials');
     }
   };
 
-  const saveChanges = async (reviewsToSave = reviews) => {
+  const handleLogout = () => {
+    setIsLoggedIn(false);
+    sessionStorage.removeItem('isLoggedIn');
+    setReviews([]);
+    setInitialReviews([]);
+  };
+
+  const saveOrPushChanges = async () => {
     setIsSaving(true);
-    try {
-      const response = await fetch('/api/save-reviews', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reviewsToSave, null, 2)
-      });
-      if (response.ok) {
-        alert('Changes saved successfully! The main website will instantly update.');
-      } else {
-        alert('Failed to save changes. Check console.');
+    
+    if (isDev) {
+      try {
+        const response = await fetch('/api/save-reviews', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reviews, null, 2)
+        });
+        if (response.ok) {
+          setInitialReviews([...reviews]);
+          alert('Local changes saved successfully to src/data/reviews.json!');
+        } else {
+          alert('Failed to save changes locally. Check console.');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Error saving local changes.');
       }
-    } catch (err) {
-      console.error(err);
-      alert('Error saving changes.');
+    } else {
+      try {
+        const jsonContent = JSON.stringify(reviews, null, 2);
+        const encodedContent = btoa(unescape(encodeURIComponent(jsonContent)));
+        
+        const response = await fetch('https://api.github.com/repos/murtazapolen/murtazapolen.github.io/contents/src/data/reviews.json', {
+          method: 'PUT',
+          headers: {
+            'Authorization': `token ${githubToken}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            message: 'Update reviews via Admin Portal',
+            content: encodedContent,
+            sha: fileSha
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setFileSha(data.content.sha); // Update SHA for subsequent saves
+          setInitialReviews([...reviews]); // Reset pristine state to current reviews
+          alert('Changes pushed successfully! The website is rebuilding and will be live in ~30 seconds.');
+        } else {
+          alert('Failed to push changes. Your salt might have expired or lacks repo permissions.');
+        }
+      } catch (err) {
+        console.error(err);
+        alert('Error pushing changes.');
+      }
     }
     setIsSaving(false);
   };
@@ -123,8 +246,7 @@ function AdminPortal() {
       updatedReviews[editingIndex] = draftReview;
     }
     
-    setReviews(updatedReviews); // Update local state
-    saveChanges(updatedReviews); // Save to server
+    setReviews(updatedReviews); // Update local state ONLY (in-memory)
     setCurrentView('list');
   };
 
@@ -137,8 +259,7 @@ function AdminPortal() {
     if (confirm("Are you sure you want to delete this review?")) {
       const updated = [...reviews];
       updated.splice(index, 1);
-      setReviews(updated);
-      saveChanges(updated); // auto-save on delete
+      setReviews(updated); // Update local state ONLY (in-memory)
     }
   };
 
@@ -190,8 +311,30 @@ function AdminPortal() {
               value={password} 
               onChange={e => setPassword(e.target.value)} 
             />
+            {!isDev && (
+              <>
+                <input 
+                  type="password" 
+                  placeholder="Salt" 
+                  value={githubToken} 
+                  onChange={e => setGithubToken(e.target.value)} 
+                />
+                <div style={{display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', justifyContent: 'flex-start'}}>
+                  <input 
+                    type="checkbox" 
+                    id="remember" 
+                    checked={rememberMe} 
+                    onChange={e => setRememberMe(e.target.checked)}
+                    style={{width: 'auto', marginBottom: 0}}
+                  />
+                  <label htmlFor="remember" style={{fontSize: '13px', color: '#555', cursor: 'pointer'}}>Remember Salt Securely in Browser</label>
+                </div>
+              </>
+            )}
             {error && <p className="admin-error">{error}</p>}
-            <button type="submit">Login</button>
+            <button type="submit" disabled={isSaving}>
+              {isSaving ? 'Connecting...' : (isDev ? 'Login (Local Dev)' : 'Login & Fetch Data')}
+            </button>
           </form>
         </div>
       </div>
@@ -200,13 +343,34 @@ function AdminPortal() {
 
   // --- LIST VIEW ---
   if (currentView === 'list') {
+    const hasUnsavedChanges = JSON.stringify(reviews) !== JSON.stringify(initialReviews);
+    
     return (
       <div className="admin-dashboard">
-        <header className="admin-header">
-          <h1>Reviews Dashboard</h1>
-          <button className="save-btn" onClick={() => saveChanges(reviews)} disabled={isSaving}>
-            {isSaving ? 'Saving...' : 'Save All Changes'}
-          </button>
+        <header className="admin-header" style={{backgroundColor: hasUnsavedChanges ? '#ffe8e8' : '#f0f0f0', border: hasUnsavedChanges ? '1px solid #ffbaba' : '1px solid #ddd'}}>
+          <div style={{display: 'flex', flexDirection: 'column'}}>
+            <h1 style={{margin: 0}}>Reviews Dashboard</h1>
+            {hasUnsavedChanges ? (
+              <span style={{fontSize: '12px', color: '#d32f2f', fontWeight: 'bold'}}>UNSAVED CHANGES IN MEMORY</span>
+            ) : (
+              <span style={{fontSize: '12px', color: '#666'}}>No changes made yet. Edit below to begin.</span>
+            )}
+          </div>
+          <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
+            <button 
+              className="save-btn" 
+              onClick={saveOrPushChanges} 
+              disabled={isSaving || !hasUnsavedChanges} 
+              style={{
+                backgroundColor: hasUnsavedChanges ? (isDev ? '#1976d2' : '#d32f2f') : '#999', 
+                padding: '12px 24px',
+                cursor: (!hasUnsavedChanges || isSaving) ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {isSaving ? (isDev ? 'Saving...' : 'Pushing to GitHub...') : (isDev ? '💾 Save Local Changes' : '🚀 Push Changes to Website')}
+            </button>
+            <button onClick={handleLogout} style={{padding: '12px 15px', backgroundColor: '#f5f5f5', border: '1px solid #ddd', borderRadius: '8px', cursor: 'pointer', color: '#666'}}>Logout</button>
+          </div>
         </header>
 
         <div className="admin-content">

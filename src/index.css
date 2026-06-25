@@ -701,6 +701,17 @@ section {
     padding-right: 20px;
   }
 
+  .google-review-card {
+    margin-left: 20px;
+    margin-right: 20px;
+  }
+
+  /* Limit review text height on mobile to roughly match grid width */
+  .biography {
+    max-height: calc(100vw - 40px);
+    overflow-y: auto;
+  }
+
   /* Make grids stack nicely on mobile */
   .layout-default,
   .layout-single,

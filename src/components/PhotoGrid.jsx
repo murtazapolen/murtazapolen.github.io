@@ -5,6 +5,7 @@ export default function PhotoGrid({ photos = [], layoutClass = "layout-default",
   const [isClosing, setIsClosing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [draggedIndex, setDraggedIndex] = useState(null);
+  const [isLayoutReady, setIsLayoutReady] = useState(layoutClass !== 'layout-dynamic');
 
   // If no photos passed, use the default from the first card
   const defaultPhotos = [
@@ -37,12 +38,14 @@ export default function PhotoGrid({ photos = [], layoutClass = "layout-default",
 
   const nextPhoto = useCallback((e) => {
     if (e) e.stopPropagation();
+    if (imagesToRender.length <= 1) return;
     setIsLoading(true);
     setLightboxIndex((prev) => (prev !== null ? (prev + 1) % imagesToRender.length : null));
   }, [imagesToRender.length]);
 
   const prevPhoto = useCallback((e) => {
     if (e) e.stopPropagation();
+    if (imagesToRender.length <= 1) return;
     setIsLoading(true);
     setLightboxIndex((prev) => (prev !== null ? (prev === 0 ? imagesToRender.length - 1 : prev - 1) : null));
   }, [imagesToRender.length]);
@@ -122,35 +125,54 @@ export default function PhotoGrid({ photos = [], layoutClass = "layout-default",
   useEffect(() => {
     if (layoutClass !== 'layout-dynamic') return;
 
-    imagesToRender.forEach((photo, index) => {
-      // Check for explicit override in the string e.g. "path.jpg?shape=landscape"
-      const shapeMatch = photo.match(/[?&]shape=(landscape|portrait|square)/);
-      if (shapeMatch) {
-        setImageShapes(prev => ({ ...prev, [index]: shapeMatch[1] }));
-        return;
-      }
+    const unmeasuredPhotos = imagesToRender
+      .map((photo, index) => ({ photo, index }))
+      .filter(item => !imageShapes[item.index]);
+      
+    if (unmeasuredPhotos.length === 0) return;
 
-      if (imageShapes[index]) return; // Skip if already measured
-
-      const img = new Image();
-      // Load a tiny version to get dimensions blazingly fast
-      img.src = getOptimizedImage(photo, 100);
-      img.onload = () => {
-        const ratio = img.width / img.height;
-        let shape = 'square';
-
-        // Very sensitive thresholds to catch slight rectangles
-        if (ratio > 1.05) {
-          shape = 'landscape';
-        } else if (ratio < 0.95) {
-          shape = 'portrait';
-        } else {
-          // If it's perfectly square, force it into an assorted layout to avoid looking sad/symmetrical
-          shape = index % 2 === 0 ? 'portrait' : 'landscape';
+    const shapePromises = unmeasuredPhotos.map(({ photo, index }) => {
+      return new Promise((resolve) => {
+        // Check for explicit override in the string e.g. "path.jpg?shape=landscape"
+        const shapeMatch = photo.match(/[?&]shape=(landscape|portrait|square)/);
+        if (shapeMatch) {
+          resolve({ index, shape: shapeMatch[1] });
+          return;
         }
 
-        setImageShapes(prev => ({ ...prev, [index]: shape }));
-      };
+        const img = new Image();
+        // Load a tiny version to get dimensions blazingly fast
+        img.src = getOptimizedImage(photo, 100);
+        img.onload = () => {
+          const ratio = img.width / img.height;
+          let shape = 'square';
+
+          // Very sensitive thresholds to catch slight rectangles
+          if (ratio > 1.05) {
+            shape = 'landscape';
+          } else if (ratio < 0.95) {
+            shape = 'portrait';
+          } else {
+            // If it's perfectly square, force it into an assorted layout
+            shape = index % 2 === 0 ? 'portrait' : 'landscape';
+          }
+
+          resolve({ index, shape });
+        };
+        img.onerror = () => resolve({ index, shape: 'square' });
+      });
+    });
+
+    Promise.all(shapePromises).then(results => {
+      setImageShapes(prev => {
+        const nextShapes = { ...prev };
+        results.forEach(res => {
+          nextShapes[res.index] = res.shape;
+        });
+        return nextShapes;
+      });
+      // Allow a tiny tick for React to apply the CSS classes before fading in
+      setTimeout(() => setIsLayoutReady(true), 50);
     });
   }, [imagesToRender, layoutClass]);
 
@@ -189,7 +211,14 @@ export default function PhotoGrid({ photos = [], layoutClass = "layout-default",
 
   return (
     <>
-      <div className={`photo-grid ${layoutClass}`}>
+      <div 
+        className={`photo-grid ${layoutClass}`}
+        style={{ 
+          opacity: isLayoutReady ? 1 : 0, 
+          transition: 'opacity 0.5s ease-in-out',
+          visibility: isLayoutReady ? 'visible' : 'hidden'
+        }}
+      >
         {imagesToRender.map((photo, index) => {
           let shapeClass = '';
           if (layoutClass === 'layout-dynamic') {
@@ -228,7 +257,7 @@ export default function PhotoGrid({ photos = [], layoutClass = "layout-default",
           onTouchEnd={onTouchEndEvent}
         >
           <button className="lightbox-close" onClick={closeLightbox}>✕</button>
-          <button className="lightbox-prev" onClick={prevPhoto}>‹</button>
+          {imagesToRender.length > 1 && <button className="lightbox-prev" onClick={prevPhoto}>‹</button>}
 
           {isLoading && <div className="spinner"></div>}
           <img
@@ -240,7 +269,7 @@ export default function PhotoGrid({ photos = [], layoutClass = "layout-default",
             onLoad={() => setIsLoading(false)}
           />
 
-          <button className="lightbox-next" onClick={nextPhoto}>›</button>
+          {imagesToRender.length > 1 && <button className="lightbox-next" onClick={nextPhoto}>›</button>}
 
           <div className="lightbox-counter">
             {lightboxIndex !== null ? lightboxIndex + 1 : 0} / {imagesToRender.length}

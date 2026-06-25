@@ -15,7 +15,11 @@ export default function Navigation() {
   return (
     <nav className="main-nav">
       <div className="nav-container">
-        <div className="nav-logo" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div 
+          className="nav-logo" 
+          style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        >
           {/* <LightbulbLogo scale={0.4} hideText={false} /> */}
           MURTAZA POLEN
         </div>
