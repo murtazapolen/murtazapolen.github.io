@@ -37,6 +37,8 @@ jobs:
       - name: Build
         run: npm run build
         env:
+          PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+          PUPPETEER_EXECUTABLE_PATH: "/usr/bin/google-chrome"
           VITE_ADMIN_USER: ${{ secrets.ADMIN_USER }}
           VITE_ADMIN_PASS: ${{ secrets.ADMIN_PASS }}
       - name: Setup Pages
