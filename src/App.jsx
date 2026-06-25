@@ -1,16 +1,17 @@
 import React from 'react';
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import MainSite from './MainSite';
 import AdminPortal from './AdminPortal';
+import './App.css';
 
 function App() {
   return (
-    <HashRouter>
+    <Router>
       <Routes>
         <Route path="/" element={<MainSite />} />
         <Route path="/salt" element={<AdminPortal />} />
       </Routes>
-    </HashRouter>
+    </Router>
   );
 }
 
